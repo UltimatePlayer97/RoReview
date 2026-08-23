@@ -292,7 +292,7 @@ function getReviewHTML() {
         <div id="hr-auth-panel" class="hr-auth-panel" style="display:none;"></div>
         <div id="hr-self-notice" class="hr-system-notice" style="display:none;">You cannot review your own profile.</div>
         <div id="hr-blocked-strip" class="hr-system-notice" style="display:none;"></div>
-        <div id="hr-blocked-notice" class="hr-system-notice" style="display:none;">You have been blocked from reviewing this profile.</div>
+        <div id="hr-blocked-notice" class="hr-system-notice" style="display:none;">You have been blocked from writing or editing reviews on this profile.</div>
 
         <div id="hr-write-review" class="hr-write-review" style="display:none;">
             <textarea id="hr-review-input" placeholder="Share your thoughts about this user..." maxlength="8000"></textarea>
@@ -469,7 +469,7 @@ function updateSummary() {
 function renderReview(review) {
     const isAuthor = currentUser && String(review.from.id) === String(currentUser.id);
     const isProfileOwner = currentUser && String(currentUser.id) === String(targetId);
-    const canEdit = isAuthor;
+    const canEdit = isAuthor && !viewerBlocked;
     const canDelete = isAuthor || isProfileOwner;
 
     const up = review.score?.up || 0;
