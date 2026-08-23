@@ -13,6 +13,8 @@ let currentPage = 1;
 let activeObserver = null;
 let bulkDeleteMode = false;
 let bulkDeleteSelection = new Set();
+let blockedUsers = [];
+let viewerBlocked = false;
 const avatarCache = {};
 
 // --- Utils ---
@@ -173,9 +175,12 @@ async function loadReviews() {
         const data = await apiCall(`${API_BASE}/api/roblox/reviews/${targetId}`);
         allReviews = data.reviews || [];
         profileRating = data.profile_rating || { up: [], down: [] };
+        blockedUsers = data.blocked || [];
+        viewerBlocked = !!data.viewer_blocked;
         updateSummary();
         renderAuthState();   // re-evaluate owner controls now that reviews are loaded
         await renderPage(1);
+        renderBlockedStrip();
     } catch (e) { console.error(e); }
 }
 
@@ -254,6 +259,17 @@ async function rateProfile(vote) {
     } catch (e) { alert(`Failed to rate profile: ${e.message}`); }
 }
 
+async function setBlock(userId, blocked) {
+    try {
+        await apiCall(`${API_BASE}/api/roblox/reviews/${targetId}/block`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId, blocked })
+        });
+        await loadReviews();
+    } catch (e) { alert(`Block failed: ${e.message}`); }
+}
+
 // --- UI ---
 function getReviewHTML() {
     return `
@@ -275,6 +291,8 @@ function getReviewHTML() {
 
         <div id="hr-auth-panel" class="hr-auth-panel" style="display:none;"></div>
         <div id="hr-self-notice" class="hr-system-notice" style="display:none;">You cannot review your own profile.</div>
+        <div id="hr-blocked-strip" class="hr-system-notice" style="display:none;"></div>
+        <div id="hr-blocked-notice" class="hr-system-notice" style="display:none;">You have been blocked from reviewing this profile.</div>
 
         <div id="hr-write-review" class="hr-write-review" style="display:none;">
             <textarea id="hr-review-input" placeholder="Share your thoughts about this user..." maxlength="8000"></textarea>
@@ -382,6 +400,7 @@ function injectCSS() {
         .hr-footer{display:flex;justify-content:space-between;align-items:center;margin-top:16px;}
         .hr-footer-left{display:flex;gap:16px;align-items:center;}
         .hr-report-link{color:var(--hrv-text-2) !important;font-weight:400 !important;font-size:12px;}
+        .hr-blocked-chip{display:inline-flex;align-items:center;gap:6px;background:var(--hrv-bg);border:1px solid var(--hrv-border);border-radius:999px;padding:2px 10px;margin:6px 6px 0 0;font-size:12px;}
     `;
     document.head.appendChild(style);
 }
@@ -464,6 +483,11 @@ function renderReview(review) {
     const avatar = avatarCache[review.from.id] || FALLBACK_AVATAR;
     const isSelected = bulkDeleteSelection.has(review.from.id);
 
+    const isBlocked = blockedUsers.includes(Number(review.from.id));
+    const blockBtn = (isProfileOwner && String(review.from.id) !== String(targetId))
+        ? `<button class="hrv-btn-link hr-block-btn" data-author="${review.from.id}" data-blocked="${isBlocked}">${isBlocked ? 'Unblock' : 'Block'}</button>`
+        : '';
+
     return `
         <div class="hr-review ${isSelected ? 'hr-bulk-selected' : ''}" data-id="${review.id}" data-author-id="${review.from.id}">
             <div class="hr-review-header">
@@ -476,6 +500,7 @@ function renderReview(review) {
                 <div class="hr-review-actions">
                     ${canEdit && !bulkDeleteMode ? `<button class="hrv-btn-link hr-edit-btn">Edit</button>` : ''}
                     ${canDelete && !bulkDeleteMode ? `<button class="hrv-btn-link hr-delete-btn" style="color:var(--hrv-red);">Delete</button>` : ''}
+                    ${blockBtn}
                 </div>
             </div>
             <div class="hr-review-body">${escapeHtml(review.content)}</div>
@@ -534,23 +559,39 @@ function renderAuthState() {
     const logoutBtn = document.getElementById('hr-logout-btn');
     const selfNotice = document.getElementById('hr-self-notice');
     const bulkBtn = document.getElementById('hr-bulk-delete-btn');
+    const blockedNotice = document.getElementById('hr-blocked-notice');
 
     if (currentUser) {
         loginPrompt.style.display = 'none';
         logoutBtn.style.display = 'inline-block';
+        
         if (String(currentUser.id) === String(targetId)) {
+            // OWN PROFILE
             writeReview.style.display = 'none';
             selfNotice.style.display = 'block';
+            blockedNotice.style.display = 'none';
             bulkBtn.style.display = allReviews.length > 0 ? 'inline-block' : 'none';
+            
+        } else if (viewerBlocked) {
+            // LOGGED IN, BUT BLOCKED BY THIS PROFILE
+            writeReview.style.display = 'none';
+            selfNotice.style.display = 'none';
+            blockedNotice.style.display = 'block';
+            bulkBtn.style.display = 'none';
+            
         } else {
+            // LOGGED IN, NORMAL VISITOR
             writeReview.style.display = 'block';
             selfNotice.style.display = 'none';
+            blockedNotice.style.display = 'none';
             bulkBtn.style.display = 'none';
         }
     } else {
+        // LOGGED OUT
         loginPrompt.style.display = 'block';
         writeReview.style.display = 'none';
         selfNotice.style.display = 'none';
+        blockedNotice.style.display = 'none';
         logoutBtn.style.display = 'none';
         bulkBtn.style.display = 'none';
     }
@@ -596,6 +637,19 @@ function attachEventListeners() {
         // Pagination
         if (target.classList.contains('btn-page')) { await renderPage(parseInt(target.dataset.page)); return; }
 
+        // Block
+        if (target.classList.contains('hr-block-btn')) {
+            const author = parseInt(target.dataset.author);
+            const isBlocked = target.dataset.blocked === 'true';
+            if (!isBlocked && !confirm('Block this user from leaving new reviews on your profile?')) return;
+            await setBlock(author, !isBlocked);
+            return;
+        }
+        if (target.classList.contains('hr-unblock-btn')) {
+            await setBlock(parseInt(target.dataset.author), false);
+            return;
+        }
+
         // Bulk delete mode: clicking a review toggles selection by author
         if (bulkDeleteMode && target.closest('.hr-review')) {
             const reviewEl = target.closest('.hr-review');
@@ -637,6 +691,22 @@ function attachEventListeners() {
                 await editReview(reviewEl.dataset.id, textarea.value.trim());
             }
         }
+    });
+}
+
+function renderBlockedStrip() {
+    const strip = document.getElementById('hr-blocked-strip');
+    const isOwner = currentUser && String(currentUser.id) === String(targetId);
+    if (!isOwner || blockedUsers.length === 0) { strip.style.display = 'none'; strip.innerHTML = ''; return; }
+
+    strip.style.display = 'block';
+    strip.innerHTML = `<strong>Blocked users (${blockedUsers.length}):</strong> <span class="hr-blocked-names">loading…</span>`;
+    Promise.all(blockedUsers.map(id => fetchUsername(id))).then(names => {
+        const el = strip.querySelector('.hr-blocked-names');
+        if (!el) return;
+        el.innerHTML = blockedUsers.map((id, i) =>
+            `<span class="hr-blocked-chip">${escapeHtml(names[i])} <button class="hrv-btn-link hr-unblock-btn" data-author="${id}">Unblock</button></span>`
+        ).join('');
     });
 }
 
