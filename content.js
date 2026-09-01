@@ -6,6 +6,7 @@ const FALLBACK_AVATAR = 'data:image/svg+xml;utf8,' + encodeURIComponent(
 
 let currentUser = null;
 let targetId = null;
+let targetIsGame = false; // NEW: Tracks if we are on a game page
 let targetUsername = '';
 let allReviews = [];
 let profileRating = { up: [], down: [] };
@@ -46,6 +47,20 @@ async function fetchUsername(userId) {
         }
     } catch (e) {}
     return 'User';
+}
+
+// NEW: Fetch game name
+async function fetchGameName(gameId) {
+    try {
+        const res = await fetch(`https://games.roblox.com/v1/games?universeIds=${gameId}`);
+        if (res.ok) {
+            const data = await res.json();
+            if (data.data && data.data.length > 0) {
+                return data.data[0].name || 'Game';
+            }
+        }
+    } catch (e) {}
+    return 'Game';
 }
 
 async function ensureAvatars(ids) {
@@ -108,7 +123,7 @@ function logout() {
     chrome.storage.local.remove(['session_token', 'user_id', 'username'], () => {
         currentUser = null;
         renderAuthState();
-        updateSummary();   // clears the active vote highlight
+        updateSummary();
         renderPage();
     });
 }
@@ -172,13 +187,14 @@ async function fallbackFriendOracle() {
 // --- Data ---
 async function loadReviews() {
     try {
-        const data = await apiCall(`${API_BASE}/api/roblox/reviews/${targetId}`);
+        const gameQuery = targetIsGame ? '?game=true' : '';
+        const data = await apiCall(`${API_BASE}/api/roblox/reviews/${targetId}${gameQuery}`);
         allReviews = data.reviews || [];
         profileRating = data.profile_rating || { up: [], down: [] };
         blockedUsers = data.blocked || [];
         viewerBlocked = !!data.viewer_blocked;
         updateSummary();
-        renderAuthState();   // re-evaluate owner controls now that reviews are loaded
+        renderAuthState();
         await renderPage(1);
         renderBlockedStrip();
     } catch (e) { console.error(e); }
@@ -191,10 +207,14 @@ async function submitReview() {
     if (!content) return alert('Review cannot be empty.');
     if (content.length > 8000) return alert('Review is too long.');
     try {
-        await apiCall(`${API_BASE}/api/roblox/reviews/${targetId}`, {
+        const body = { content };
+        if (targetIsGame) body.game = true;
+        const gameQuery = targetIsGame ? '?game=true' : '';
+        
+        await apiCall(`${API_BASE}/api/roblox/reviews/${targetId}${gameQuery}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content })
+            body: JSON.stringify(body)
         });
         input.value = '';
         document.getElementById('hr-char-count').textContent = '0';
@@ -205,10 +225,14 @@ async function submitReview() {
 async function editReview(reviewId, newContent) {
     if (!newContent.trim()) return alert('Review cannot be empty.');
     try {
-        await apiCall(`${API_BASE}/api/roblox/reviews/${targetId}/${reviewId}`, {
+        const body = { content: newContent };
+        if (targetIsGame) body.game = true;
+        const gameQuery = targetIsGame ? '?game=true' : '';
+        
+        await apiCall(`${API_BASE}/api/roblox/reviews/${targetId}/${reviewId}${gameQuery}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content: newContent })
+            body: JSON.stringify(body)
         });
         await loadReviews();
     } catch (e) { alert(`Failed to edit review: ${e.message}`); }
@@ -217,7 +241,9 @@ async function editReview(reviewId, newContent) {
 async function deleteReview(reviewId) {
     if (!confirm('Are you sure you want to delete this review?')) return;
     try {
-        await apiCall(`${API_BASE}/api/roblox/reviews/${targetId}/${reviewId}`, { method: 'DELETE' });
+        const gameQuery = targetIsGame ? '?game=true' : '';
+        // Using query param for DELETE to ensure compatibility with proxies that strip DELETE bodies
+        await apiCall(`${API_BASE}/api/roblox/reviews/${targetId}/${reviewId}${gameQuery}`, { method: 'DELETE' });
         await loadReviews();
     } catch (e) { alert(`Failed to delete review: ${e.message}`); }
 }
@@ -226,10 +252,14 @@ async function bulkDelete() {
     if (bulkDeleteSelection.size === 0) return alert('No users selected.');
     if (!confirm(`Delete all reviews from ${bulkDeleteSelection.size} selected user(s)? This can only be done once per day.`)) return;
     try {
-        await apiCall(`${API_BASE}/api/roblox/reviews/${targetId}/bulk-delete`, {
+        const body = { user_ids: [...bulkDeleteSelection] };
+        if (targetIsGame) body.game = true;
+        const gameQuery = targetIsGame ? '?game=true' : '';
+        
+        await apiCall(`${API_BASE}/api/roblox/reviews/${targetId}/bulk-delete${gameQuery}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_ids: [...bulkDeleteSelection] })
+            body: JSON.stringify(body)
         });
         bulkDeleteMode = false;
         bulkDeleteSelection.clear();
@@ -239,10 +269,14 @@ async function bulkDelete() {
 
 async function rateReview(reviewId, vote) {
     try {
-        await apiCall(`${API_BASE}/api/roblox/reviews/${targetId}/${reviewId}/rate`, {
+        const body = { vote };
+        if (targetIsGame) body.game = true;
+        const gameQuery = targetIsGame ? '?game=true' : '';
+        
+        await apiCall(`${API_BASE}/api/roblox/reviews/${targetId}/${reviewId}/rate${gameQuery}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ vote })
+            body: JSON.stringify(body)
         });
         await loadReviews();
     } catch (e) { alert(`Failed to rate review: ${e.message}`); }
@@ -250,10 +284,14 @@ async function rateReview(reviewId, vote) {
 
 async function rateProfile(vote) {
     try {
-        await apiCall(`${API_BASE}/api/roblox/reviews/${targetId}/rate`, {
+        const body = { vote };
+        if (targetIsGame) body.game = true;
+        const gameQuery = targetIsGame ? '?game=true' : '';
+        
+        await apiCall(`${API_BASE}/api/roblox/reviews/${targetId}/rate${gameQuery}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ vote })
+            body: JSON.stringify(body)
         });
         await loadReviews();
     } catch (e) { alert(`Failed to rate profile: ${e.message}`); }
@@ -261,10 +299,14 @@ async function rateProfile(vote) {
 
 async function setBlock(userId, blocked) {
     try {
-        await apiCall(`${API_BASE}/api/roblox/reviews/${targetId}/block`, {
+        const body = { user_id: userId, blocked };
+        if (targetIsGame) body.game = true;
+        const gameQuery = targetIsGame ? '?game=true' : '';
+        
+        await apiCall(`${API_BASE}/api/roblox/reviews/${targetId}/block${gameQuery}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: userId, blocked })
+            body: JSON.stringify(body)
         });
         await loadReviews();
     } catch (e) { alert(`Block failed: ${e.message}`); }
@@ -272,9 +314,13 @@ async function setBlock(userId, blocked) {
 
 // --- UI ---
 function getReviewHTML() {
+    const placeholder = targetIsGame ? 'Share your thoughts about this game...' : 'Share your thoughts about this user...';
+    const titlePrefix = targetIsGame ? 'Reviews for game' : 'Reviews for';
+    const reportSubject = targetIsGame ? `Game ${targetId}` : `Profile ${targetId}`;
+
     return `
     <div id="hermivore-reviews-container" class="hermivore-reviews">
-        <h2 class="hr-title">Reviews for <span id="hr-target-name">${escapeHtml(targetUsername)}</span></h2>
+        <h2 class="hr-title">${titlePrefix} <span id="hr-target-name">${escapeHtml(targetUsername)}</span></h2>
 
         <div class="hr-profile-rating">
             <span class="hr-profile-rating-label">Community Rating</span>
@@ -290,12 +336,12 @@ function getReviewHTML() {
         </div>
 
         <div id="hr-auth-panel" class="hr-auth-panel" style="display:none;"></div>
-        <div id="hr-self-notice" class="hr-system-notice" style="display:none;">You cannot review your own profile.</div>
+        <div id="hr-self-notice" class="hr-system-notice" style="display:none;">You cannot review your own ${targetIsGame ? 'game' : 'profile'}.</div>
         <div id="hr-blocked-strip" class="hr-system-notice" style="display:none;"></div>
-        <div id="hr-blocked-notice" class="hr-system-notice" style="display:none;">You have been blocked from writing or editing reviews on this profile.</div>
+        <div id="hr-blocked-notice" class="hr-system-notice" style="display:none;">You have been blocked from writing or editing reviews here.</div>
 
         <div id="hr-write-review" class="hr-write-review" style="display:none;">
-            <textarea id="hr-review-input" placeholder="Share your thoughts about this user..." maxlength="8000"></textarea>
+            <textarea id="hr-review-input" placeholder="${placeholder}" maxlength="8000"></textarea>
             <div class="hr-write-actions">
                 <button id="hr-submit-review" class="hrv-btn-primary">Post Review</button>
                 <span class="hr-char-count"><span id="hr-char-count">0</span>/8000</span>
@@ -320,7 +366,7 @@ function getReviewHTML() {
                 <button id="hr-bulk-delete-btn" class="hrv-btn-link" style="display:none;">Bulk Delete</button>
                 <button id="hr-logout-btn" class="hrv-btn-link" style="display:none;">Log out</button>
             </div>
-            <a href="mailto:support@hermivore.cat?subject=Review Report (Profile ${targetId})" class="hrv-btn-link hr-report-link">Report abuse</a>
+            <a href="mailto:support@hermivore.cat?subject=Review Report (${reportSubject})" class="hrv-btn-link hr-report-link">Report abuse</a>
         </div>
     </div>`;
 }
@@ -468,7 +514,8 @@ function updateSummary() {
 
 function renderReview(review) {
     const isAuthor = currentUser && String(review.from.id) === String(currentUser.id);
-    const isProfileOwner = currentUser && String(currentUser.id) === String(targetId);
+    // Only consider someone the profile owner if it's NOT a game
+    const isProfileOwner = !targetIsGame && currentUser && String(currentUser.id) === String(targetId);
     const canEdit = isAuthor && !viewerBlocked;
     const canDelete = isAuthor || isProfileOwner;
 
@@ -484,6 +531,7 @@ function renderReview(review) {
     const isSelected = bulkDeleteSelection.has(review.from.id);
 
     const isBlocked = blockedUsers.includes(Number(review.from.id));
+    // Hide block button entirely for games
     const blockBtn = (isProfileOwner && String(review.from.id) !== String(targetId))
         ? `<button class="hrv-btn-link hr-block-btn" data-author="${review.from.id}" data-blocked="${isBlocked}">${isBlocked ? 'Unblock' : 'Block'}</button>`
         : '';
@@ -565,29 +613,26 @@ function renderAuthState() {
         loginPrompt.style.display = 'none';
         logoutBtn.style.display = 'inline-block';
         
-        if (String(currentUser.id) === String(targetId)) {
-            // OWN PROFILE
+        // OWN PROFILE (Disabled for games since we don't verify game ownership)
+        if (!targetIsGame && String(currentUser.id) === String(targetId)) {
             writeReview.style.display = 'none';
             selfNotice.style.display = 'block';
             blockedNotice.style.display = 'none';
             bulkBtn.style.display = allReviews.length > 0 ? 'inline-block' : 'none';
             
         } else if (viewerBlocked) {
-            // LOGGED IN, BUT BLOCKED BY THIS PROFILE
             writeReview.style.display = 'none';
             selfNotice.style.display = 'none';
             blockedNotice.style.display = 'block';
             bulkBtn.style.display = 'none';
             
         } else {
-            // LOGGED IN, NORMAL VISITOR
             writeReview.style.display = 'block';
             selfNotice.style.display = 'none';
             blockedNotice.style.display = 'none';
             bulkBtn.style.display = 'none';
         }
     } else {
-        // LOGGED OUT
         loginPrompt.style.display = 'block';
         writeReview.style.display = 'none';
         selfNotice.style.display = 'none';
@@ -712,23 +757,38 @@ function renderBlockedStrip() {
 
 // --- Init & SPA routing ---
 async function init() {
-    const match = window.location.pathname.match(/\/users\/(\d+)\//);
-    if (!match) return;
+    const userMatch = window.location.pathname.match(/\/users\/(\d+)\//);
+    const gameMatch = window.location.pathname.match(/\/games\/(\d+)\//);
+    
+    let newTargetId = null;
+    let newIsGame = false;
+    
+    if (userMatch) {
+        newTargetId = userMatch[1];
+        newIsGame = false;
+    } else if (gameMatch) {
+        newTargetId = gameMatch[1];
+        newIsGame = true;
+    } else {
+        return;
+    }
 
-    const newTargetId = match[1];
-    if (newTargetId === targetId && document.getElementById('hermivore-reviews-container')) return;
+    if (newTargetId === targetId && newIsGame === targetIsGame && document.getElementById('hermivore-reviews-container')) return;
+    
     targetId = newTargetId;
-    targetUsername = await fetchUsername(targetId);
+    targetIsGame = newIsGame;
+    targetUsername = targetIsGame ? await fetchGameName(targetId) : await fetchUsername(targetId);
+    
     bulkDeleteMode = false;
     bulkDeleteSelection.clear();
 
-    // disconnect existing observer, it gets recreated right after this
     disconnectActiveObserver();
 
     const observer = new MutationObserver((mutations, obs) => {
         const mainContent = document.querySelector('.content-main') || document.querySelector('main') || document.body;
         if (mainContent && !document.getElementById('hermivore-reviews-container')) {
-            if (document.querySelector('.profile-header') || window.location.pathname.includes('/profile')) {
+            // Inject on profile pages OR game pages
+            if (document.querySelector('.profile-header') || window.location.pathname.includes('/profile') || window.location.pathname.includes('/games/')) {
                 obs.disconnect();
                 injectCSS();
                 mainContent.insertAdjacentHTML('beforeend', getReviewHTML());
@@ -741,9 +801,8 @@ async function init() {
             }
         }
     });
-    // set active observer to the active observer
+    
     activeObserver = observer;
-
     observer.observe(document.body, { childList: true, subtree: true });
 }
 
@@ -755,10 +814,9 @@ new MutationObserver(() => {
         const old = document.getElementById('hermivore-reviews-container');
         if (old) old.remove();
 
-        // disconnect existing observer on navigation
         disconnectActiveObserver();
 
-        if (window.location.pathname.match(/\/users\/(\d+)\//)) init();
+        if (window.location.pathname.match(/\/users\/(\d+)\//) || window.location.pathname.match(/\/games\/(\d+)\//)) init();
         else targetId = null;
     }
 }).observe(document, { subtree: true, childList: true });
