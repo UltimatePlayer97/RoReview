@@ -6,7 +6,8 @@ const FALLBACK_AVATAR = 'data:image/svg+xml;utf8,' + encodeURIComponent(
 
 let currentUser = null;
 let targetId = null;
-let targetIsGame = false; // NEW: Tracks if we are on a game page
+let targetIsGame = false; // Tracks if we are on a game page
+let reviewsTabActive = false; // ^ for game tracking
 let targetUsername = '';
 let allReviews = [];
 let profileRating = { up: [], down: [] };
@@ -49,17 +50,29 @@ async function fetchUsername(userId) {
     return 'User';
 }
 
-// NEW: Fetch game name
+// Fetch game name safely without relying on APIs that might require auth
 async function fetchGameName(gameId) {
+    // Try to get it from the DOM (instant and reliable, bypasses API auth issues)
+    try {
+        const titleEl = document.querySelector('h1') || document.querySelector('.game-title') || document.querySelector('[class*="game-name"]');
+        if (titleEl && titleEl.textContent.trim()) return titleEl.textContent.trim();
+        
+        if (document.title && !document.title.startsWith('Roblox')) {
+            return document.title.replace(' - Roblox', '').trim() || 'Game';
+        }
+    } catch (e) {}
+
+    // Fallback API (may fail if CORS or auth issues occur)
     try {
         const res = await fetch(`https://games.roblox.com/v1/games?universeIds=${gameId}`);
         if (res.ok) {
             const data = await res.json();
-            if (data.data && data.data.length > 0) {
-                return data.data[0].name || 'Game';
+            if (data.data && data.data.length > 0 && data.data[0].name) {
+                return data.data[0].name;
             }
         }
     } catch (e) {}
+    
     return 'Game';
 }
 
@@ -242,7 +255,6 @@ async function deleteReview(reviewId) {
     if (!confirm('Are you sure you want to delete this review?')) return;
     try {
         const gameQuery = targetIsGame ? '?game=true' : '';
-        // Using query param for DELETE to ensure compatibility with proxies that strip DELETE bodies
         await apiCall(`${API_BASE}/api/roblox/reviews/${targetId}/${reviewId}${gameQuery}`, { method: 'DELETE' });
         await loadReviews();
     } catch (e) { alert(`Failed to delete review: ${e.message}`); }
@@ -490,7 +502,6 @@ function updateSummary() {
     const down = profileRating.down.length;
     const totalVotes = up + down;
 
-    // Top summary: vote-based % + "(X votes | Y reviews)"
     const scoreEl = document.getElementById('hr-score-text');
     const countEl = document.getElementById('hr-review-count');
 
@@ -505,7 +516,6 @@ function updateSummary() {
         scoreEl.style.color = pct >= 70 ? 'var(--hrv-green)' : (pct >= 40 ? 'var(--hrv-text)' : 'var(--hrv-red)');
     }
 
-    // Community rating buttons: counts + highlight the caller's own vote
     document.getElementById('hr-profile-up-count').textContent = up;
     document.getElementById('hr-profile-down-count').textContent = down;
     document.getElementById('hr-profile-up').classList.toggle('active', uid !== null && profileRating.up.includes(uid));
@@ -595,7 +605,6 @@ async function renderPage(page = 1) {
     listEl.innerHTML = pageReviews.map(renderReview).join('');
     paginationEl.innerHTML = renderPagination(allReviews.length, currentPage, REVIEWS_PER_PAGE);
 
-    // Update bulk bar count
     if (bulkDeleteMode) {
         document.getElementById('hr-bulk-count').textContent = `${bulkDeleteSelection.size} user(s) selected`;
     }
@@ -668,7 +677,6 @@ function attachEventListeners() {
     document.getElementById('hr-bulk-confirm').onclick = bulkDelete;
     document.getElementById('hr-bulk-cancel').onclick = () => toggleBulkMode(false);
 
-    // Profile vote buttons
     document.querySelectorAll('.hr-profile-vote').forEach(btn => {
         btn.onclick = async () => {
             if (!currentUser) { login(); return; }
@@ -679,10 +687,8 @@ function attachEventListeners() {
     document.getElementById('hermivore-reviews-container').addEventListener('click', async (e) => {
         const target = e.target;
 
-        // Pagination
         if (target.classList.contains('btn-page')) { await renderPage(parseInt(target.dataset.page)); return; }
 
-        // Block
         if (target.classList.contains('hr-block-btn')) {
             const author = parseInt(target.dataset.author);
             const isBlocked = target.dataset.blocked === 'true';
@@ -695,7 +701,6 @@ function attachEventListeners() {
             return;
         }
 
-        // Bulk delete mode: clicking a review toggles selection by author
         if (bulkDeleteMode && target.closest('.hr-review')) {
             const reviewEl = target.closest('.hr-review');
             const authorId = parseInt(reviewEl.dataset.authorId);
@@ -704,12 +709,10 @@ function attachEventListeners() {
             } else {
                 bulkDeleteSelection.add(authorId);
             }
-            // Re-render to show selection state
             await renderPage(currentPage);
             return;
         }
 
-        // Review voting
         if (target.closest('.hr-vote-btn')) {
             if (!currentUser) { login(); return; }
             const btn = target.closest('.hr-vote-btn');
@@ -717,13 +720,11 @@ function attachEventListeners() {
             return;
         }
 
-        // Delete single
         if (target.classList.contains('hr-delete-btn')) {
             await deleteReview(target.closest('.hr-review').dataset.id);
             return;
         }
 
-        // Edit
         if (target.classList.contains('hr-edit-btn')) {
             const reviewEl = target.closest('.hr-review');
             const body = reviewEl.querySelector('.hr-review-body');
@@ -755,6 +756,99 @@ function renderBlockedStrip() {
     });
 }
 
+// --- Native "Reviews" tab on game pages ---
+function findGameTabBar() {
+    return document.querySelector('#horizontal-tabs') ||
+           document.querySelector('.tabs-horizontal ul') ||
+           document.querySelector('ul[role="tablist"]');
+}
+
+function setupGameReviewsTab() {
+    if (!targetIsGame) return false;
+    if (document.getElementById('hr-tab-reviews')) return true;
+    const tabList = findGameTabBar();
+    if (!tabList) return false;
+
+    const sample = tabList.querySelector('li');
+    const li = document.createElement('li');
+    li.id = 'hr-tab-reviews';
+    if (sample) li.className = sample.className;
+
+    const sampleLink = sample ? (sample.querySelector('a') || sample.querySelector('button')) : null;
+    const link = document.createElement(sampleLink ? sampleLink.tagName.toLowerCase() : 'a');
+    if (sampleLink) link.className = sampleLink.className;
+    link.textContent = 'Reviews';
+    link.href = '#';
+    li.appendChild(link);
+
+    // strip active/selected styling inherited from the cloned (active) tab
+    [li, link].forEach(el => {
+        el.className = String(el.className).split(/\s+/)
+            .filter(c => c && !/active|selected|current/i.test(c)).join(' ');
+    });
+
+    tabList.appendChild(li);
+    return true;
+}
+
+function applyTabVisibility() {
+    const content = document.querySelector('.tab-content') || document.querySelector('.rbx-tab-content');
+    const container = document.getElementById('hermivore-reviews-container');
+    if (content) content.style.display = reviewsTabActive ? 'none' : '';
+    if (container) container.style.display = reviewsTabActive ? '' : 'none';
+}
+
+function setReviewsTab(on) {
+    reviewsTabActive = on;
+
+    const tabList = findGameTabBar();
+    if (tabList) {
+        tabList.querySelectorAll('li').forEach(li => {
+            const isOurs = li.id === 'hr-tab-reviews';
+            const l = li.querySelector('a,button');
+            if (isOurs) {
+                li.classList.toggle('active', on);
+                if (l) l.classList.toggle('active', on);
+            } else if (on) {
+                li.classList.remove('active');
+                if (l) l.classList.remove('active');
+            }
+        });
+    }
+
+    applyTabVisibility();
+    // React may swap/remount .tab-content on a later tick; re-apply after paint
+    requestAnimationFrame(applyTabVisibility);
+    setTimeout(applyTabVisibility, 50);
+
+    if (on) {
+        const container = document.getElementById('hermivore-reviews-container');
+        if (container) container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+}
+
+// capture-phase listener runs BEFORE React's handlers, so leaving
+// Reviews is always synchronous no matter how Roblox's router navigates.
+document.addEventListener('click', (e) => {
+    if (!targetIsGame || !(e.target instanceof Element)) return;
+
+    if (e.target.closest('#hr-tab-reviews')) {
+        e.preventDefault();
+        e.stopPropagation();
+        setReviewsTab(true);
+        return;
+    }
+
+    const tabList = findGameTabBar();
+    if (tabList && tabList.contains(e.target) && reviewsTabActive) {
+        setReviewsTab(false); // native tab clicked: drop reviews view immediately
+    }
+}, true);
+
+// Backups for back/forward and anything that does change the hash
+window.addEventListener('hashchange', () => { if (targetIsGame && reviewsTabActive) setReviewsTab(false); });
+window.addEventListener('popstate',   () => { if (targetIsGame && reviewsTabActive) setReviewsTab(false); });
+
 // --- Init & SPA routing ---
 async function init() {
     const userMatch = window.location.pathname.match(/\/users\/(\d+)\//);
@@ -784,40 +878,65 @@ async function init() {
 
     disconnectActiveObserver();
 
-    const observer = new MutationObserver((mutations, obs) => {
+    const tryInject = () => {
         const mainContent = document.querySelector('.content-main') || document.querySelector('main') || document.body;
         if (mainContent && !document.getElementById('hermivore-reviews-container')) {
-            // Inject on profile pages OR game pages
-            if (document.querySelector('.profile-header') || window.location.pathname.includes('/profile') || window.location.pathname.includes('/games/')) {
-                obs.disconnect();
+            const isProfile = document.querySelector('.profile-header') || window.location.pathname.includes('/profile');
+            const isGame = window.location.pathname.includes('/games/');
+            
+            if (isProfile || isGame) {
+                // We inject directly into mainContent (usually body or main) to avoid React tab re-renders wiping our container
                 injectCSS();
                 mainContent.insertAdjacentHTML('beforeend', getReviewHTML());
                 applyTheme();
                 attachEventListeners();
+                if (targetIsGame) {
+                    setupGameReviewsTab();
+                    applyTabVisibility(); // starts hidden if the native tab bar was found
+                }
                 loadState().then(async () => {
                     renderAuthState();
                     await loadReviews();
                 });
+                return true;
             }
         }
-    });
-    
-    activeObserver = observer;
-    observer.observe(document.body, { childList: true, subtree: true });
+        return false;
+    };
+
+    // Try injecting immediately in case the DOM is already fully loaded
+    if (!tryInject()) {
+        // If the DOM isn't ready yet, use the observer to catch the moment it loads
+        const observer = new MutationObserver(() => {
+            if (tryInject()) {
+                activeObserver.disconnect();
+                activeObserver = null;
+            }
+        });
+        
+        activeObserver = observer;
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
 }
 
-let lastUrl = location.href;
+let lastPath = location.pathname;
 new MutationObserver(() => {
-    const url = location.href;
-    if (url !== lastUrl) {
-        lastUrl = url;
+    const path = location.pathname;
+    if (path !== lastPath) {
+        lastPath = path;
         const old = document.getElementById('hermivore-reviews-container');
         if (old) old.remove();
+        const oldTab = document.getElementById('hr-tab-reviews');
+        if (oldTab) oldTab.remove();
+        reviewsTabActive = false;
 
         disconnectActiveObserver();
 
-        if (window.location.pathname.match(/\/users\/(\d+)\//) || window.location.pathname.match(/\/games\/(\d+)\//)) init();
+        if (path.match(/\/users\/(\d+)\//) || path.match(/\/games\/(\d+)\//)) init();
         else targetId = null;
+    } else if (targetIsGame) {
+        // React may rebuild the tab bar when switching tabs; re-add our tab if it vanished
+        setupGameReviewsTab();
     }
 }).observe(document, { subtree: true, childList: true });
 
