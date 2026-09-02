@@ -2,10 +2,10 @@ Ever been scammed in a trade? Wanted to know if a user is actually trustworthy b
 Roblox Profile & Game Reviews brings a familiar, Steam-inspired review system directly to Roblox. Let the community build a transparent reputation system where you can leave feedback, read about other players' experiences, and see a quick "Positive Percentage" score at a glance - right on user profiles and game pages.  
 
 # Features:
-Universal Reviews: View a clean, paginated list of reviews at the bottom of any user profile or game page, complete with an overall community rating.  
-Curate the Community: Upvote helpful, honest reviews and downvote spam or toxicity to help others make informed decisions.  
-Community Ratings: Leave a quick 👍 or 👎 on any profile or game page to contribute to the overall community score.  
-Control Your Space: Edit your own reviews, and use powerful moderation tools on your own profile to bulk-delete spam or block toxic users from leaving future reviews.  
+- Universal Reviews: View a clean, paginated list of reviews at the bottom of any user profile or game page, complete with an overall community rating.  
+- Curate the Community: Upvote helpful, honest reviews and downvote spam or toxicity to help others make informed decisions.  
+- Community Ratings: Leave a quick 👍 or 👎 on any profile or game page to contribute to the overall community score.  
+- Control Your Space: Edit your own reviews, and use powerful moderation tools on your own profile to bulk-delete spam or block toxic users from leaving future reviews.  
 
 # Verification:  
 To prevent spam, bots, and fake reviews, you must verify your identity to leave a review. We **never** ask for your password or `.ROBLOSECURITY` cookie!  
