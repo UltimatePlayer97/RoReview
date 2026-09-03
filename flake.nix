@@ -1,5 +1,5 @@
 {
-  description = "Reviews for roblox users";
+  description = "Leave and read Steam-style reputation reviews on Roblox profiles and games. Upvote, downvote, and see who to trust before you trade or play.";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

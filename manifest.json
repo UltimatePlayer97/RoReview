@@ -17,19 +17,7 @@
         "https://www.roblox.com/games/*"
       ],
       "js": [
-        "content/constants.js",
-        "content/state.js",
-        "content/utils.js",
-        "content/api.js",
-        "content/auth.js",
-        "content/data.js",
-        "content/actions.js",
-        "content/ui/template.js",
-        "content/ui/styles.js",
-        "content/ui/render.js",
-        "content/ui/events.js",
-        "content/game-tabs.js",
-        "content/init.js"
+        "content.js"
       ],
       "run_at": "document_idle"
     }
