@@ -20,7 +20,7 @@ Reviews are stored securely and fetched only when you visit a relevant profile o
 # Build Instructions
 To build the extension, since it is in TypeScript there is a few more steps required.
 1. Run `bun install` to install dependencies.
-2. Nix users, simply run `nix build` to build the project and `nix develop` to set up the development environment.
+2. Nix users, simply run `nix develop` to set up the development environment.
 3. Run `bun run build` to compile the TypeScript code.
  - The generated `content.js` and `manifest.json` will be output to the `dist/` directory.
 4. head over to `chrome://extensions/` and load the `dist/` directory as an unpacked extension (make sure developer mode is enabled).
